@@ -1,154 +1,91 @@
-# check.py - Check and checkmate detection
-
-from ..constants import COLOR_WHITE, COLOR_BLACK, KING
+# check.py - Check detection and king-safety move filtering
+#
+# This is the "rule validation layer": it takes the pseudo-legal moves a
+# piece generates (piece.get_moves) and filters out any move that would
+# leave that player's own king in check.
+#
+# Pattern (see get_legal_moves / _is_move_safe):
+#
+#     generate pseudo-legal move
+#             |
+#     temporarily make the move on the real board
+#             |
+#     is our own king attacked now?
+#             |
+#     YES -> illegal, undo          NO -> legal, undo
+#
+# This is the same generic simulate/undo approach for every piece, so
+# pins, discovered checks, and double checks are all handled correctly
+# without hard-coding any of them.
+#
+# Checkmate / stalemate detection is a separate step and is not in this
+# file yet.
 
 
 class CheckDetector:
-    """Detects check, checkmate, and stalemate conditions."""
-
-    @staticmethod
-    def is_square_attacked(board, row, col, by_color):
-        """
-        Determine if a square is attacked by any piece of the given color.
-
-        Args:
-            board: The Board object.
-            row (int): Target row.
-            col (int): Target column.
-            by_color (str): The attacking color ('white' or 'black').
-
-        Returns:
-            bool: True if the square is under attack.
-        """
-        for piece in board.get_pieces(by_color):
-            possible_moves = piece.get_possible_moves(board)
-            if (row, col) in possible_moves:
-                return True
-        return False
+    """Detects check and filters pseudo-legal moves for king safety."""
 
     @staticmethod
     def is_in_check(board, color):
-        """
-        Check whether the given color's king is in check.
+        """Return True if `color`'s king is currently under attack."""
 
-        Args:
-            board: The Board object.
-            color (str): The color whose king to check.
+        king_pos = board.get_king(color)
 
-        Returns:
-            bool: True if the king is in check.
-        """
-        king = board.get_king(color)
-        if king is None:
+        if king_pos is None:
             return False
-        enemy_color = COLOR_BLACK if color == COLOR_WHITE else COLOR_WHITE
-        return CheckDetector.is_square_attacked(board, king.row, king.col, enemy_color)
+
+        king_row, king_col = king_pos
+
+        enemy_color = "black" if color == "white" else "white"
+
+        return board.is_square_attacked(king_row, king_col, enemy_color)
 
     @staticmethod
-    def is_checkmate(board, color):
+    def get_legal_moves(board, row, col):
         """
-        Determine if the given color is in checkmate.
-
-        Checkmate = in check AND no legal moves available.
-
-        Args:
-            board: The Board object.
-            color (str): The color to test.
-
-        Returns:
-            bool: True if checkmate.
+        Return the fully legal moves for the piece at (row, col):
+        pseudo-legal moves with anything that leaves the mover's own
+        king in check removed.
         """
-        if not CheckDetector.is_in_check(board, color):
-            return False
-        return not CheckDetector._has_legal_moves(board, color)
+
+        piece = board.get_piece(row, col)
+
+        if piece is None:
+            return []
+
+        legal_moves = []
+
+        for end_row, end_col in piece.get_moves(board, row, col):
+
+            if CheckDetector._is_move_safe(board, row, col, end_row, end_col, piece.color):
+
+                legal_moves.append((end_row, end_col))
+
+        return legal_moves
 
     @staticmethod
-    def is_stalemate(board, color):
+    def _is_move_safe(board, start_row, start_col, end_row, end_col, color):
         """
-        Determine if the given color is in stalemate.
+        Temporarily play the move on the real board, check whether
+        `color`'s king is in check as a result, then always undo it.
 
-        Stalemate = NOT in check AND no legal moves available.
-
-        Args:
-            board: The Board object.
-            color (str): The color to test.
-
-        Returns:
-            bool: True if stalemate.
+        Deliberately bypasses board.move_piece() and never touches
+        has_moved, so simulating a move can never corrupt future castling
+        rights - only set_piece/remove_piece are used, both fully
+        reversible.
         """
-        if CheckDetector.is_in_check(board, color):
-            return False
-        return not CheckDetector._has_legal_moves(board, color)
 
-    @staticmethod
-    def _has_legal_moves(board, color):
-        """
-        Check if the given color has any legal moves.
+        moving_piece = board.get_piece(start_row, start_col)
+        captured_piece = board.get_piece(end_row, end_col)
 
-        Tries every pseudo-legal move and tests whether it leaves
-        the king in check. Returns True as soon as one legal move is found.
-        """
-        for piece in board.get_pieces(color):
-            for move in piece.get_possible_moves(board):
-                # Simulate the move and see if king is still in check
-                if CheckDetector._is_move_legal(board, piece, move):
-                    return True
-        return False
+        # Make the move
+        board.set_piece(end_row, end_col, moving_piece)
+        board.remove_piece(start_row, start_col)
 
-    @staticmethod
-    def _is_move_legal(board, piece, target_square):
-        """
-        Test if a move is legal by simulating it and checking for self-check.
-
-        Args:
-            board: The Board object.
-            piece: The piece to move.
-            target_square: (row, col) destination.
-
-        Returns:
-            bool: True if the move does not leave own king in check.
-        """
-        target_row, target_col = target_square
-
-        # Save state
-        original_row, original_col = piece.row, piece.col
-        captured_piece = board.get_piece(target_row, target_col)
-
-        # Make the move on the board
-        board.set_piece(original_row, original_col, None)
-        board.set_piece(target_row, target_col, piece)
-        piece.row = target_row
-        piece.col = target_col
-
-        # Check if own king is in check after the move
-        in_check = CheckDetector.is_in_check(board, piece.color)
+        king_in_check = CheckDetector.is_in_check(board, color)
 
         # Undo the move
-        piece.row = original_row
-        piece.col = original_col
-        board.set_piece(original_row, original_col, piece)
-        board.set_piece(target_row, target_col, captured_piece)
+        board.set_piece(start_row, start_col, moving_piece)
+        board.set_piece(end_row, end_col, captured_piece)
 
-        return not in_check
-
-    @staticmethod
-    def get_checking_pieces(board, color):
-        """
-        Find all enemy pieces that are giving check to the given color's king.
-
-        Args:
-            board: The Board object.
-            color (str): The color whose king is being checked.
-
-        Returns:
-            list[Piece]: List of enemy pieces delivering check.
-        """
-        king = board.get_king(color)
-        if king is None:
-            return []
-        enemy_color = COLOR_BLACK if color == COLOR_WHITE else COLOR_WHITE
-        checkers = []
-        for piece in board.get_pieces(enemy_color):
-            if (king.row, king.col) in piece.get_possible_moves(board):
-                checkers.append(piece)
-        return checkers
+        return not king_in_check

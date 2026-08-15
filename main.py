@@ -27,13 +27,7 @@ while running:
 
         elif event.type == pygame.MOUSEBUTTONDOWN:
 
-            x, y = pygame.mouse.get_pos()
-
-            row = y // SQUARE_SIZE
-
-            col = x // SQUARE_SIZE
-
-            game.select(row, col)
+            game.handle_click(pygame.mouse.get_pos())
 
     game.draw(screen)
 

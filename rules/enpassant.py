@@ -1,108 +1,95 @@
 # enpassant.py - En passant logic
+#
+# Rewritten against the project's real Board/Piece API. Timing is
+# tracked via board.en_passant_target (set fresh by Board.apply_move()
+# after every single move - see board.py), not by inspecting piece
+# history, so the opportunity automatically disappears the instant any
+# other move is played.
 
-from ..constants import PAWN, COLOR_WHITE
+from pieces.pawn import Pawn
+from move import Move
 
 
 class EnPassantHandler:
-    """Handles en passant capture validation and execution."""
+    """Handles en passant capture detection and legality."""
 
     @staticmethod
-    def check_en_passant_trigger(piece, start_row, end_row):
+    def get_en_passant_move(board, row, col):
         """
-        Determine if a pawn move creates an en passant opportunity.
-
-        A pawn that advances two squares from its starting row creates
-        an en passant target square on the square it passed through.
-
-        Args:
-            piece: The piece that just moved.
-            start_row (int): The row the piece moved from.
-            end_row (int): The row the piece moved to.
-
-        Returns:
-            tuple or None: The en passant target square (row, col), or None.
+        If the pawn at (row, col) has an en passant capture available
+        RIGHT NOW, return the (not-yet-safety-checked) Move for it,
+        else None.
         """
-        if piece.piece_type != PAWN:
+
+        piece = board.get_piece(row, col)
+
+        if piece is None or not isinstance(piece, Pawn):
             return None
 
-        if abs(start_row - end_row) != 2:
+        target = board.en_passant_target
+
+        if target is None:
             return None
 
-        # The en passant target is the square the pawn "passed through"
-        ep_row = (start_row + end_row) // 2
-        return (ep_row, piece.col)
+        target_row, target_col = target
+
+        direction = -1 if piece.color == "white" else 1
+
+        # The capturing pawn must be one diagonal step from the target
+        # square (i.e. sitting right next to the pawn that just double-
+        # stepped, on the correct side to capture "forward").
+        if row + direction != target_row:
+            return None
+
+        if abs(col - target_col) != 1:
+            return None
+
+        # The pawn being captured sits on the capturing pawn's own row,
+        # in the target's column - NOT on the (empty) target square.
+        captured_square = (row, target_col)
+        captured_piece = board.get_piece(*captured_square)
+
+        if (
+            captured_piece is None
+            or not isinstance(captured_piece, Pawn)
+            or captured_piece.color == piece.color
+        ):
+            return None
+
+        return Move(
+            (row, col),
+            (target_row, target_col),
+            piece=piece,
+            captured_piece=captured_piece,
+            is_en_passant=True,
+            captured_square=captured_square,
+        )
 
     @staticmethod
-    def is_en_passant_capture(board, piece, target_row, target_col):
+    def is_safe(board, move, color):
         """
-        Check if a pawn move to (target_row, target_col) is an en passant capture.
-
-        Args:
-            board: The Board object.
-            piece: The moving pawn.
-            target_row (int): Destination row.
-            target_col (int): Destination column.
-
-        Returns:
-            bool: True if this is an en passant capture.
+        Simulate the en passant capture and confirm it doesn't leave
+        `color`'s own king in check (classic case: two pawns are the
+        only thing blocking a rook/queen on the same rank as the king -
+        capturing en passant removes one of them and opens a discovered
+        check). Always undoes the simulation before returning.
         """
-        if piece.piece_type != PAWN:
-            return False
 
-        if board.en_passant_square is None:
-            return False
+        from .check import CheckDetector
 
-        if (target_row, target_col) != board.en_passant_square:
-            return False
+        moving_piece = board.get_piece(move.start_row, move.start_col)
+        captured_piece = board.get_piece(*move.captured_square)
 
-        # Pawn must be moving diagonally
-        if abs(piece.col - target_col) != 1:
-            return False
+        # Simulate
+        board.remove_piece(*move.captured_square)
+        board.set_piece(move.end_row, move.end_col, moving_piece)
+        board.remove_piece(move.start_row, move.start_col)
 
-        return True
+        king_in_check = CheckDetector.is_in_check(board, color)
 
-    @staticmethod
-    def execute_en_passant(board, piece, target_row, target_col):
-        """
-        Execute an en passant capture.
+        # Undo
+        board.set_piece(move.start_row, move.start_col, moving_piece)
+        board.remove_piece(move.end_row, move.end_col)
+        board.set_piece(move.captured_square[0], move.captured_square[1], captured_piece)
 
-        Removes the captured pawn from the board and moves the
-        capturing pawn to the target square.
-
-        Args:
-            board: The Board object.
-            piece: The capturing pawn.
-            target_row (int): Destination row.
-            target_col (int): Destination column.
-
-        Returns:
-            Piece: The captured pawn (for undo purposes).
-        """
-        # The captured pawn is on the same row as the capturing pawn,
-        # in the target column
-        captured_pawn_row = piece.row  # same row as attacker before move
-        captured_pawn = board.get_piece(captured_pawn_row, target_col)
-
-        # Remove captured pawn
-        board.set_piece(captured_pawn_row, target_col, None)
-
-        # Move attacking pawn
-        board.set_piece(piece.row, piece.col, None)
-        piece.move_to(target_row, target_col)
-        board.set_piece(target_row, target_col, piece)
-
-        return captured_pawn
-
-    @staticmethod
-    def get_captured_pawn_position(piece, target_col):
-        """
-        Get the position of the pawn that would be captured en passant.
-
-        Args:
-            piece: The capturing pawn.
-            target_col (int): The column of the en passant target square.
-
-        Returns:
-            tuple: (row, col) of the pawn to be captured.
-        """
-        return (piece.row, target_col)
+        return not king_in_check

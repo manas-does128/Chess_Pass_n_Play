@@ -25,7 +25,7 @@ class Pawn(Piece):
                 moves.append((row + direction, col))
 
                 # Two squares on first move
-                if not self.has_moved:
+                if not self.has_moved and self.inside(row + 2 * direction, col):
 
                     if board.get_piece(row + 2 * direction, col) is None:
 

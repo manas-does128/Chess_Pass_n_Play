@@ -1,86 +1,54 @@
 # promotion.py - Pawn promotion logic
+#
+# Rewritten against the project's real Piece API: pieces are constructed
+# as PieceClass(color) only (no row/col args), and there is no
+# piece_type attribute - isinstance() against Pawn is used instead.
 
-from ..constants import PAWN, QUEEN, ROOK, BISHOP, KNIGHT, COLOR_WHITE, PROMOTION_CHOICES
-from ..pieces import Queen, Rook as RookPiece, Bishop as BishopPiece, Knight as KnightPiece
+from pieces.pawn import Pawn
+from pieces.queen import Queen
+from pieces.rook import Rook
+from pieces.bishop import Bishop
+from pieces.knight import Knight
 
 
 class PromotionHandler:
-    """Handles pawn promotion detection and execution."""
+    """Handles pawn promotion detection and the piece-choice mapping."""
+
+    QUEEN = "queen"
+    ROOK = "rook"
+    BISHOP = "bishop"
+    KNIGHT = "knight"
+
+    CHOICES = [QUEEN, ROOK, BISHOP, KNIGHT]
+
+    PIECE_CLASSES = {
+        QUEEN: Queen,
+        ROOK: Rook,
+        BISHOP: Bishop,
+        KNIGHT: Knight,
+    }
 
     @staticmethod
-    def is_promotion(piece, target_row):
-        """
-        Check if a move results in pawn promotion.
+    def is_promotion_square(piece, end_row):
+        """True if moving `piece` to end_row reaches the final rank."""
 
-        Args:
-            piece: The piece being moved.
-            target_row (int): The destination row.
-
-        Returns:
-            bool: True if this pawn reaches the promotion rank.
-        """
-        if piece.piece_type != PAWN:
+        if not isinstance(piece, Pawn):
             return False
 
-        if piece.color == COLOR_WHITE and target_row == 0:
+        if piece.color == "white" and end_row == 0:
             return True
-        if piece.color != COLOR_WHITE and target_row == 7:
+
+        if piece.color == "black" and end_row == 7:
             return True
 
         return False
 
     @staticmethod
-    def promote(board, pawn, target_row, target_col, choice=QUEEN):
-        """
-        Execute pawn promotion by replacing the pawn with the chosen piece.
+    def get_piece_class(choice):
+        """Map a promotion choice string to its Piece subclass."""
 
-        Args:
-            board: The Board object.
-            pawn: The pawn being promoted.
-            target_row (int): The promotion row.
-            target_col (int): The promotion column.
-            choice (str): The piece type to promote to (default: queen).
-
-        Returns:
-            Piece: The newly created promoted piece.
-        """
-        if choice not in PROMOTION_CHOICES:
-            choice = QUEEN
-
-        # Create the promoted piece
-        new_piece = PromotionHandler._create_piece(choice, pawn.color, target_row, target_col)
-
-        # Place on board
-        board.set_piece(target_row, target_col, new_piece)
-
-        return new_piece
-
-    @staticmethod
-    def _create_piece(piece_type, color, row, col):
-        """
-        Factory method to create a new piece for promotion.
-
-        Args:
-            piece_type (str): Type of piece to create.
-            color (str): Color of the piece.
-            row (int): Row position.
-            col (int): Column position.
-
-        Returns:
-            Piece: The new piece instance.
-        """
-        piece_map = {
-            QUEEN: Queen,
-            ROOK: RookPiece,
-            BISHOP: BishopPiece,
-            KNIGHT: KnightPiece,
-        }
-        piece_class = piece_map.get(piece_type, Queen)
-        new_piece = piece_class(color, row, col)
-        new_piece.has_moved = True
-        return new_piece
+        return PromotionHandler.PIECE_CLASSES.get(choice, Queen)
 
     @staticmethod
     def get_promotion_choices():
-        """Return the list of valid promotion piece types."""
-        return list(PROMOTION_CHOICES)
+        return list(PromotionHandler.CHOICES)
