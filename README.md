@@ -33,8 +33,9 @@ chess/
 │
 ├── assets/          # Piece images for GUI (optional)
 │   ├── white/
+|   |── sounds/
 │   └── black/
-│
+| 
 └── README.md
 ```
 
